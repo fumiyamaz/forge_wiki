@@ -25,27 +25,30 @@
 var fs = require('fs');
 
 var ForgeSDK = require('./../src/index');
+var http = require('http');
 
 // TODO - insert your CLIENT_ID and CLIENT_SECRET
-var FORGE_CLIENT_ID = process.env.FORGE_CLIENT_ID || 'your forge client id';
-var FORGE_CLIENT_SECRET = process.env.FORGE_CLIENT_SECRET || 'your forge client secret';
+var FORGE_CLIENT_ID = process.env.FORGE_CLIENT_ID || '80iaGiqC8JuYNaxpWKUs0oQqPm4edZ0l';
+var FORGE_CLIENT_SECRET = process.env.FORGE_CLIENT_SECRET || '8IiYKXF7tDGDRbQm';
 
 // TODO - Choose a bucket key - a unique name to assign to a bucket. It must be globally unique across all applications and
 // regions, otherwise the call will fail. Possible values: -_.a-z0-9 (between 3-128 characters in
 // length). Note that you cannot change a bucket key.
-var BUCKET_KEY = 'forge_sample_' + FORGE_CLIENT_ID.toLowerCase();
+var BUCKET_KEY = '80iagiqc8juybaxpwkus0oqqpm4edz01-transient-test3';
 
 // TODO - Choose a filename - a key for the uploaded object
-var FILE_NAME = 'test.nwd';
+var FILE_NAME = 'セグメント3.rvt';
 
 // TODO - specify the full filename and path
-var FILE_PATH = 'test.nwd';
+var FILE_PATH = 'C:/Users/fmazw/OneDrive/デスクトップ/セグメント3.rvt';
 
 var apiClient = new ForgeSDK.ApiClient();
 apiClient.defaultHeaders = { 'x-ads-test': BUCKET_KEY };
 
 var bucketsApi = new ForgeSDK.BucketsApi(apiClient), // Buckets Client
 	objectsApi = new ForgeSDK.ObjectsApi(apiClient); // Objects Client
+	derivativesApi = new ForgeSDK.DerivativesApi(); // Derivatives Client
+
 
 // Initialize the 2-legged oauth2 client
 var oAuth2TwoLegged = new ForgeSDK.AuthClientTwoLegged(FORGE_CLIENT_ID, FORGE_CLIENT_SECRET,
@@ -68,6 +71,134 @@ var getBucketDetails = function (bucketKey) {
 	console.log("**** Getting bucket details : " + bucketKey);
 	return bucketsApi.getBucketDetails(bucketKey, oAuth2TwoLegged, oAuth2TwoLegged.getCredentials());
 };
+
+
+function base64encode(str) {
+	return new Buffer(str).toString('base64');
+  }
+
+  var translateFile = function(encodedURN){
+	console.log("**** Translating file derivative");
+	var postJob =
+	{
+	  input: {
+		urn: encodedURN
+	  },
+	  output: {
+		formats: [
+		  {
+			type: "svf",
+			views: ["2d", "3d"]
+		  }
+		]
+	  }
+	};
+  
+	return new Promise(function(resolve, reject) {
+	  derivativesApi.translate(postJob, {}, oAuth2TwoLegged, oAuth2TwoLegged.getCredentials()).then(
+		function(res){
+		  resolve(res);
+		},function(err){
+		  reject(err);
+		}
+	  ) 
+	});
+  };
+
+
+  var manifestFile = function (encodedURN) {
+	console.log("**** Getting File Manifest Status");
+	
+	return new Promise(function(resolve, reject) {
+	  derivativesApi.getManifest(encodedURN, {}, oAuth2TwoLegged, oAuth2TwoLegged.getCredentials()).then(
+		function(res){
+		  if (res.body.progress != "complete"){
+			console.log("The status of your file is " + res.body.status);
+			console.log(" Please wait while we finish Translating your file");
+		  }else{
+			console.log("****" + res.body.status);
+			console.log("****" + res.body.progress);
+			resolve(res);
+		  }
+		},function(err){
+		  reject(err);
+		}
+	  ) 
+	});
+  }
+
+  var server = http.createServer();
+  server.listen(3000, "localhost");
+  console.log("Server is listening port 3000");
+  
+  var showViewer = function (credentials, encodedURN) {
+  
+	server.on('request', function(req,res){
+	  var access_token = credentials["access_token"];
+	  res.writeHead(200, {'Content-Type': 'text/html'});
+	  var data = [
+		'<html>',
+		'  <head>',
+		'    <title>Forge Viewer</title>',
+		'    <meta charset="utf-8">',
+		'    <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css" type="text/css">',
+		'    <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js" type="text/javascript"></script>',
+		'    <script src="https://code.jquery.com/jquery-2.1.2.min.js"></script>',
+		'    <script>',
+		'      $(document).ready(function () {',
+		'',
+		'        var options = {',
+		"          env: 'AutodeskProduction',",
+		"          api: 'derivativeV2',",
+		"          language: 'ja',",
+		'          getAccessToken: function (onTokenReady) {',
+		"            var token = '" + access_token +"';",
+		'            var timeInSeconds = 3600;',
+		'            onTokenReady(token, timeInSeconds);',
+		'          }',
+		'        };',
+		'',
+		'        Autodesk.Viewing.Initializer(options, function () {',
+		"          _viewer = new Autodesk.Viewing.GuiViewer3D(document.getElementById('viewer3d'), options);",
+		'',
+		'          var startedCode = _viewer.start();',
+		'          if (startedCode > 0) {',
+		"            console.error('Failed to create a Viewer: WebGL not supported.');",
+		'            return;',
+		'          }',
+		'',
+		"          console.log('Initialization complete, loading a model next...');",
+		'',
+		"          var documentId = '" + "urn:" + encodedURN + "';",
+		'          Autodesk.Viewing.Document.load(documentId, onDocumentLoadSuccess, onDocumentLoadFailure);',
+		'        });',
+		'',
+		'        function onDocumentLoadSuccess(viewerDocument) {',
+		'          var viewables = viewerDocument.getRoot().search({',
+		"            'type': 'geometry',",
+		"            'role': '3d'",
+		'          });',
+		'          _viewer.loadDocumentNode(viewerDocument, viewables[0]).then(i => {',
+		'          });',
+		'        }',
+		'',
+		'        function onDocumentLoadFailure() {',
+		"          console.error('Failed fetching Forge manifest');",
+		'        }',
+		'',
+		'      });',
+		'    </script>',
+		'  </head>',
+		'  <body>',
+		'    <div id="viewer3d"></div>',
+		'  </body>',
+		'</html>'
+	  ].join('\n');
+	  res.write(data);
+	  res.end();
+	});
+  }
+  
 
 /**
  * Create a new bucket.
@@ -184,9 +315,21 @@ oAuth2TwoLegged.authenticate().then(function (credentials) {
 			uploadFile(BUCKET_KEY, FILE_PATH, FILE_NAME).then(function (uploadRes) {
 				console.log("**** Upload file response:", uploadRes.body);
 
-				deleteFile(BUCKET_KEY, FILE_NAME).then(function (deleteRes) {
-					console.log("**** Delete file response status code:", deleteRes.statusCode);
+
+				var objectId = uploadRes.body.objectId;
+				console.log("objectId:", objectId);
+				var urn = base64encode(objectId);
+				console.log("urn:", urn);
+		
+				translateFile(urn).then(function(translateRes){
+		 
+				  manifestFile(urn).then(function(){
+					console.log("**** Your File is ready for viewing"); 
+					showViewer(credentials,urn);
+				  }, defaultHandleError) 
+		
 				}, defaultHandleError);
+
 
 			}, defaultHandleError);
 
